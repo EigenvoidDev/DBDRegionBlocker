@@ -1,79 +1,42 @@
-REGIONS = {
-    "US East (N. Virginia)": {
-        "region": "us-east-1",
-        "service_endpoint": "gamelift.us-east-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.us-east-1.api.aws",
-    },
-    "US East (Ohio)": {
-        "region": "us-east-2",
-        "service_endpoint": "gamelift.us-east-2.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.us-east-2.api.aws",
-    },
-    "US West (N. California)": {
-        "region": "us-west-1",
-        "service_endpoint": "gamelift.us-west-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.us-west-1.api.aws",
-    },
-    "US West (Oregon)": {
-        "region": "us-west-2",
-        "service_endpoint": "gamelift.us-west-2.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.us-west-2.api.aws",
-    },
-    "Canada (Central)": {
-        "region": "ca-central-1",
-        "service_endpoint": "gamelift.ca-central-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.ca-central-1.api.aws",
-    },
-    "Europe (Ireland)": {
-        "region": "eu-west-1",
-        "service_endpoint": "gamelift.eu-west-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.eu-west-1.api.aws",
-    },
-    "Europe (London)": {
-        "region": "eu-west-2",
-        "service_endpoint": "gamelift.eu-west-2.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.eu-west-2.api.aws",
-    },
-    "Europe (Frankfurt)": {
-        "region": "eu-central-1",
-        "service_endpoint": "gamelift.eu-central-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.eu-central-1.api.aws",
-    },
-    "Asia Pacific (Mumbai)": {
-        "region": "ap-south-1",
-        "service_endpoint": "gamelift.ap-south-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.ap-south-1.api.aws",
-    },
-    "Asia Pacific (Hong Kong)": {
-        "region": "ap-east-1",
-        "service_endpoint": "ec2.ap-east-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.ap-east-1.api.aws",
-    },
-    "Asia Pacific (Tokyo)": {
-        "region": "ap-northeast-1",
-        "service_endpoint": "gamelift.ap-northeast-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.ap-northeast-1.api.aws",
-    },
-    "Asia Pacific (Seoul)": {
-        "region": "ap-northeast-2",
-        "service_endpoint": "gamelift.ap-northeast-2.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.ap-northeast-2.api.aws",
-    },
-    "Asia Pacific (Singapore)": {
-        "region": "ap-southeast-1",
-        "service_endpoint": "gamelift.ap-southeast-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.ap-southeast-1.api.aws",
-    },
-    "Asia Pacific (Sydney)": {
-        "region": "ap-southeast-2",
-        "service_endpoint": "gamelift.ap-southeast-2.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.ap-southeast-2.api.aws",
-    },
-    "South America (São Paulo)": {
-        "region": "sa-east-1",
-        "service_endpoint": "gamelift.sa-east-1.amazonaws.com",
-        "udp_ping_beacon_endpoint": "gamelift-ping.sa-east-1.api.aws",
-    },
+# =========
+# Regions
+# =========
+
+REGION_INFO = {
+    "US East (N. Virginia)": "us-east-1",
+    "US East (Ohio)": "us-east-2",
+    "US West (N. California)": "us-west-1",
+    "US West (Oregon)": "us-west-2",
+    "Canada (Central)": "ca-central-1",
+    "Europe (Ireland)": "eu-west-1",
+    "Europe (London)": "eu-west-2",
+    "Europe (Frankfurt)": "eu-central-1",
+    "Asia Pacific (Mumbai)": "ap-south-1",
+    "Asia Pacific (Hong Kong)": "ap-east-1",
+    "Asia Pacific (Tokyo)": "ap-northeast-1",
+    "Asia Pacific (Seoul)": "ap-northeast-2",
+    "Asia Pacific (Singapore)": "ap-southeast-1",
+    "Asia Pacific (Sydney)": "ap-southeast-2",
+    "South America (São Paulo)": "sa-east-1",
 }
+
+# Special-case overrides for regions with nonstandard endpoints
+REGION_OVERRIDES = {
+    "Asia Pacific (Hong Kong)": {"service_endpoint": "ec2.ap-east-1.amazonaws.com"}
+}
+
+REGIONS = {
+    name: {
+        "region": code,
+        "service_endpoint": f"gamelift.{code}.amazonaws.com",
+        "udp_ping_beacon_endpoint": f"gamelift-ping.{code}.api.aws",
+        **REGION_OVERRIDES.get(name, {}),
+    }
+    for name, code in REGION_INFO.items()
+}
+
+# =========
+# Latencies
+# =========
 
 LATENCY_THRESHOLDS = {"good": 100, "ok": 200}

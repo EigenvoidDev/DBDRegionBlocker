@@ -44,9 +44,10 @@ QComboBox {
 
 QComboBox::drop-down {
 	image: url(images/chevron-down.png);
+	margin-right: 2px;
 	subcontrol-origin: padding;
 	subcontrol-position: center right;
-	width: 27.5px;
+	width: 25px;
 }
 
 QComboBox QAbstractItemView {
@@ -63,11 +64,6 @@ QComboBox QAbstractItemView::item {
 QComboBox QAbstractItemView::item:selected {
 	background-color: #a93e3e;
 	outline: none;
-}
-
-QComboBox QScrollBar:vertical,
-QScrollBar:horizontal {
-	background: #3a3a3a;
 }
 
 /* Push Button Styles */
@@ -96,22 +92,19 @@ QTextEdit#pingOutput {
 	padding: 4px;
 }
 
-QTextEdit#pingOutput QScrollBar:vertical,
-QScrollBar:horizontal {
-	background: #121212;
-}
-
-/* ScrollBar Track Styles */
+/* Scroll Bar Styles */
 QScrollBar:vertical,
 QScrollBar:horizontal {
-	margin: 2px;
-	width: 10px;
+	background: #3a3a3a;
+	border: none;
+	height: 10px;
+	margin: 0;
+	width: 7.5px;
 }
 
-/* ScrollBar Handle Styles */
 QScrollBar::handle:vertical,
 QScrollBar::handle:horizontal {
-	background: #5e5e5e;
+	background: #7a7a7a;
 }
 
 QScrollBar::add-line,
@@ -119,4 +112,5 @@ QScrollBar::sub-line,
 QScrollBar::add-page,
 QScrollBar::sub-page {
 	background: none;
+	border: none;
 }
