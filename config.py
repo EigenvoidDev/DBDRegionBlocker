@@ -1,7 +1,3 @@
-# =========
-# Regions
-# =========
-
 REGION_INFO = {
     "US East (N. Virginia)": "us-east-1",
     "US East (Ohio)": "us-east-2",
@@ -34,9 +30,5 @@ REGIONS = {
     }
     for name, code in REGION_INFO.items()
 }
-
-# =========
-# Latencies
-# =========
 
 LATENCY_THRESHOLDS = {"good": 100, "ok": 200}

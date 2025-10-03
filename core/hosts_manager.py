@@ -1,17 +1,18 @@
+from enum import Enum
+from pathlib import Path
 import platform
 import subprocess
-from pathlib import Path
 
 from config import REGIONS
 
 # =====================
 # Constants
 # =====================
-SECTION_START = "# DBDRegionSelectorHostsSectionStart"
-SECTION_END = "# DBDRegionSelectorHostsSectionEnd"
-ERROR_MESSAGE = "Administrator privileges required. Please run this application as an administrator."
+HOSTS_SECTION_START = "# BEGIN DBD Region Selector Section"
+HOSTS_SECTION_END = "# END DBD Region Selector Section"
+ADMIN_PRIVILEGES_ERROR = "This action requires administrator privileges. Please restart the program as an administrator."
 
-HOSTS_PATH = {
+HOSTS_PATHS = {
     "Windows": Path(r"C:\Windows\System32\drivers\etc\hosts"),
     "Linux": Path("/etc/hosts"),
     "Darwin": Path("/etc/hosts"),  # macOS
@@ -26,9 +27,19 @@ FLUSH_COMMANDS = {
     ],
 }
 
+# Precomputed mapping of UDP endpoints → region names
+ENDPOINT_TO_REGION = {
+    data["udp_ping_beacon_endpoint"]: name for name, data in REGIONS.items()
+}
 
-class UnsupportedPlatformError(Exception):
-    pass
+# =====================
+# Enums
+# =====================
+class HostsUpdateStatus(Enum):
+    UPDATE_SUCCESS = 1
+    ALREADY_UP_TO_DATE = 2
+    PERMISSION_ERROR = 3
+    WRITE_ERROR = 4
 
 
 # =====================
@@ -37,19 +48,19 @@ class UnsupportedPlatformError(Exception):
 def get_hosts_path():
     system = platform.system()
     try:
-        return HOSTS_PATH[system]
+        return HOSTS_PATHS[system]
     except KeyError:
-        raise UnsupportedPlatformError(f"Unsupported platform: {system}")
+        raise RuntimeError(f"Unsupported platform: {system}")
 
 
 def strip_existing_section(lines):
     new_lines, in_block = [], False
     for line in lines:
         stripped = line.strip()
-        if stripped == SECTION_START:
+        if stripped == HOSTS_SECTION_START:
             in_block = True
             continue
-        if stripped == SECTION_END:
+        if stripped == HOSTS_SECTION_END:
             in_block = False
             continue
         if not in_block:
@@ -57,22 +68,27 @@ def strip_existing_section(lines):
     return new_lines
 
 
-def build_hosts_section_lines(active_region=None, comment_all=False):
+def build_hosts_section_lines(active_regions=None, all_regions_active=False):
+    if active_regions is None:
+        active_regions = []
+
     lines = [
-        SECTION_START,
+        HOSTS_SECTION_START,
         "# This section is managed by DBD Region Selector.",
         "# It maps endpoints to 0.0.0.0 to block access to specific regions.",
         "# Do not edit this section manually.",
         "",
     ]
+
     for region_name, region_data in REGIONS.items():
         hostname = region_data["udp_ping_beacon_endpoint"]
-        if comment_all or region_name == active_region:
+        if all_regions_active or region_name in active_regions:
             lines.append(f"# 0.0.0.0 {hostname}")
         else:
             lines.append(f"0.0.0.0 {hostname}")
+
     lines.append("")
-    lines.append(SECTION_END)
+    lines.append(HOSTS_SECTION_END)
     return lines
 
 
@@ -85,7 +101,7 @@ def write_hosts_file(lines):
             f.write("\n".join(lines) + "\n")
         return True
     except PermissionError:
-        print(ERROR_MESSAGE)
+        print(ADMIN_PRIVILEGES_ERROR)
         return False
 
 
@@ -108,14 +124,14 @@ def initialize_hosts_file():
         with open(get_hosts_path(), "r", encoding="utf-8") as f:
             content = f.read()
     except PermissionError:
-        print(ERROR_MESSAGE)
+        print(ADMIN_PRIVILEGES_ERROR)
         return False
 
-    if SECTION_START in content and SECTION_END in content:
+    if HOSTS_SECTION_START in content and HOSTS_SECTION_END in content:
         return True
 
     lines = content.strip().splitlines()
-    lines.extend(build_hosts_section_lines(comment_all=True))
+    lines.extend(build_hosts_section_lines(all_regions_active=True))
 
     if write_hosts_file(lines):
         flush_dns_cache()
@@ -124,40 +140,16 @@ def initialize_hosts_file():
         return False
 
 
-def get_active_regions_from_hosts():
-    active_regions = []
-
-    try:
-        with open(get_hosts_path(), "r", encoding="utf-8") as f:
-            in_block = False
-            for line in f:
-                stripped = line.strip()
-                if stripped == SECTION_START:
-                    in_block = True
-                    continue
-                elif stripped == SECTION_END:
-                    break
-                if in_block and stripped.startswith("# 0.0.0.0"):
-                    for region_name, region_data in REGIONS.items():
-                        if region_data["udp_ping_beacon_endpoint"] in stripped:
-                            active_regions.append(region_name)
-                            break
-    except PermissionError:
-        print(ERROR_MESSAGE)
-        raise
-
-    return active_regions
-
-
-def update_hosts_file(active_region=None, comment_all=False):
+def update_hosts_file(active_regions=None, all_regions_active=False):
     try:
         with open(get_hosts_path(), "r", encoding="utf-8") as f:
             lines = f.readlines()
     except PermissionError:
-        return "error"
+        print(ADMIN_PRIVILEGES_ERROR)
+        return HostsUpdateStatus.PERMISSION_ERROR
 
     new_lines = strip_existing_section(lines)
-    hosts_section = build_hosts_section_lines(active_region, comment_all)
+    hosts_section = build_hosts_section_lines(active_regions, all_regions_active)
 
     # Compare with existing section
     normalized_new = [line.rstrip("\n") for line in hosts_section]
@@ -168,10 +160,38 @@ def update_hosts_file(active_region=None, comment_all=False):
     )
 
     if normalized_existing == normalized_new:
-        return "already_set"
+        return HostsUpdateStatus.ALREADY_UP_TO_DATE
 
     if write_hosts_file(new_lines + hosts_section):
         flush_dns_cache()
-        return "updated"
+        return HostsUpdateStatus.UPDATE_SUCCESS
 
-    return "error"
+    return HostsUpdateStatus.WRITE_ERROR
+
+
+def get_active_regions_from_hosts():
+    active_regions = []
+
+    try:
+        with open(get_hosts_path(), "r", encoding="utf-8") as f:
+            in_block = False
+            for line in f:
+                stripped = line.strip()
+                if stripped == HOSTS_SECTION_START:
+                    in_block = True
+                    continue
+                elif stripped == HOSTS_SECTION_END:
+                    break
+                if in_block and stripped.startswith("# 0.0.0.0"):
+                    parts = stripped.split()
+                    if len(parts) >= 2:
+                        hostname = parts[1]
+                        region_name = ENDPOINT_TO_REGION.get(hostname)
+                        if region_name:
+                            active_regions.append(region_name)
+
+    except PermissionError:
+        print(ADMIN_PRIVILEGES_ERROR)
+        raise
+
+    return active_regions

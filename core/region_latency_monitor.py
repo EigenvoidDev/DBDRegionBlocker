@@ -1,137 +1,169 @@
+import asyncio
+from enum import Enum
 import platform
 import socket
 import subprocess
-import threading
 
-from config import REGIONS, LATENCY_THRESHOLDS
+from config import LATENCY_THRESHOLDS, REGIONS
 
-# ===============
-# Global State
-# ===============
-lock = threading.Lock()
-ping_processes = {}
-threads = {}
-results = {}
+# =============
+# Enums
+# =============
+class PingStatus(Enum):
+    INITIALIZING = "Initializing"
+    UNRESOLVED = "Unresolved"
+    SUCCEEDED = "Succeeded"
+    FAILED = "Failed"
+    ERROR = "Error"
 
-# ===============
+
+class LatencyQuality(Enum):
+    NO_RESPONSE = 0
+    GOOD = 1
+    OK = 2
+    BAD = 3
+
+
+# =============
 # Helpers
-# ===============
-def resolve_hostname(hostname):
-    try:
-        return socket.gethostbyname(hostname)
-    except socket.gaierror as e:
-        print(f"Failed to resolve {hostname}: {e}")
-        return None
-
-
+# =============
 def classify_latency(latency, error=None):
     if latency is None:
-        return error or "no_response"
+        return LatencyQuality.NO_RESPONSE
     if latency <= LATENCY_THRESHOLDS["good"]:
-        return "good"
+        return LatencyQuality.GOOD
     if latency <= LATENCY_THRESHOLDS["ok"]:
-        return "ok"
-    return "bad"
+        return LatencyQuality.OK
+    return LatencyQuality.BAD
 
 
 def parse_latency(line):
     try:
         if "time=" in line:
-            time_str = line.split("time=")[1].split()[0].replace("ms", "").strip()
-            return float(time_str)
-        if "Average =" in line:
-            return float(line.split("Average =")[-1].strip().replace("ms", ""))
+            return float(line.split("time=")[1].split()[0].replace("ms", "").strip())
     except Exception as e:
         print(f"Latency parse error: {e} (line: {line})")
     return None
 
 
-def is_ping_reply(line):
-    return any(token in line for token in ("time=", "TTL=", "ttl="))
+async def resolve_hostname(hostname):
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        print(f"Failed to resolve {hostname}: {e}")
+        return None
 
 
-def build_result_entry(region_data, ip, status):
+def build_initial_result(region_name, region_data, ip, status):
     return {
-        "region": region_data["region"],
+        "region_name": region_name,
+        "region_code": region_data["region"],
         "hostname": region_data["service_endpoint"],
         "ip": ip,
-        "latency_ms": None,
-        "packet_loss_percentage": None if ip else 100.0,
-        "status": status,
+        "succeeded_count": 0,
+        "failed_count": 0,
+        "last_ping_status": status,
+        "last_ping_latency": None,
+        "packet_loss_percentage": 100.0 if ip is None else 0.0,
     }
 
 
-# ===============
-# Ping Management
-# ===============
-def start_continuous_ping(host, result_dict, region_name):
+# =============
+# Async Ping
+# =============
+async def async_ping(region_name, ip, results, interval=5):
     system = platform.system()
-    cmd = ["ping", "-t", host] if system == "Windows" else ["ping", host]
-    creationflags = subprocess.CREATE_NO_WINDOW if system == "Windows" else 0
+    cmd = ["ping", "-n", "1", ip] if system == "Windows" else ["ping", "-c", "1", ip]
 
-    def run():
-        sent, received = 0, 0
-        try:
-            with subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                creationflags=creationflags,
-            ) as proc:
-                ping_processes[region_name] = proc
-                for line in proc.stdout:
-                    if region_name not in result_dict:
-                        break
-                    latency = parse_latency(line)
-                    if is_ping_reply(line):
-                        sent += 1
-                    if latency is not None:
-                        received += 1
-                        with lock:
-                            result_dict[region_name].update(
-                                {
-                                    "latency_ms": latency,
-                                    "status": classify_latency(latency),
-                                }
-                            )
-                    if sent > 0:
-                        packet_loss = ((sent - received) / sent) * 100
-                        with lock:
-                            result_dict[region_name].update(
-                                {
-                                    "packet_loss_percentage": round(packet_loss, 2),
-                                    "packet_loss_str": f"{packet_loss:.2f}%",
-                                }
-                            )
-        except Exception as e:
-            print(f"[{region_name}] Continuous ping error: {e}")
-            with lock:
-                result_dict[region_name]["status"] = "error"
+    succeeded, failed = 0, 0
+    proc = None
 
-    thread = threading.Thread(target=run, daemon=True)
-    threads[region_name] = thread
-    thread.start()
-    return thread
+    try:
+        while True:
+            kwargs = {}
+            if system == "Windows":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                kwargs["startupinfo"] = startupinfo
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                **kwargs,
+            )
+
+            latency = None
+            status = PingStatus.INITIALIZING
+
+            async for line_bytes in proc.stdout:
+                line = line_bytes.decode("utf-8", errors="ignore").strip()
+                line_lower = line.lower()
+
+                latency = parse_latency(line)
+                if latency is not None:
+                    succeeded += 1
+                    status = PingStatus.SUCCEEDED
+                    break
+                elif (
+                    "request timed out" in line_lower
+                    or "destination host unreachable" in line_lower
+                ):
+                    failed += 1
+                    status = PingStatus.FAILED
+                    break
+
+            total = succeeded + failed
+            packet_loss_percentage = (failed / total) * 100 if total > 0 else 0
+
+            results[region_name].update(
+                {
+                    "succeeded_count": succeeded,
+                    "failed_count": failed,
+                    "last_ping_status": status,
+                    "last_ping_latency": latency,
+                    "packet_loss_percentage": round(packet_loss_percentage, 2),
+                }
+            )
+
+            await asyncio.sleep(interval)
+
+    except asyncio.CancelledError:
+        if proc and proc.returncode is None:
+            proc.terminate()
+            await proc.wait()
+        raise
+
+    except Exception as e:
+        results[region_name].update(
+            {"last_ping_status": PingStatus.ERROR, "last_ping_latency": None}
+        )
+        print(f"[{region_name}] Ping error: {e}")
 
 
-def ping_all_regions():
+# =============
+# Runner
+# =============
+async def ping_all_regions_continuous(results, interval=5):
+    tasks = []
+
     for region_name, region_data in REGIONS.items():
-        hostname = region_data["service_endpoint"]
-        ip = resolve_hostname(hostname)
-        status = "initializing" if ip else "unresolved"
-        results[region_name] = build_result_entry(region_data, ip, status)
+        hostname = region_data.get("service_endpoint")
+        ip = None
+
+        addrinfo = await resolve_hostname(hostname)
+        if addrinfo:
+            ip = addrinfo[0][4][0]  # First resolved IP (IPv4 or IPv6)
+
+        status = PingStatus.INITIALIZING if ip else PingStatus.UNRESOLVED
+        results[region_name] = build_initial_result(
+            region_name, region_data, ip, status
+        )
+
         if ip:
-            start_continuous_ping(ip, results, region_name)
-    return results
+            task = asyncio.create_task(async_ping(region_name, ip, results, interval))
+            tasks.append(task)
 
-
-def terminate_all_pings():
-    for region, proc in ping_processes.items():
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-        except Exception as e:
-            print(f"Error terminating ping for {region}: {e}")
-    ping_processes.clear()
-    threads.clear()
+    return tasks
