@@ -2,15 +2,7 @@
 
 [Dead by Daylight](https://deadbydaylight.com/) is an online asymmetric multiplayer survival horror video game developed and published by Canadian studio [Behaviour Interactive](https://www.bhvr.com/).
 
-**DBDRegionSelector** is a desktop GUI tool that lets you control which AWS regions Dead by Daylight can connect to. It continuously measures connectivity and shows real-time details for each supported region, including:
-- **Region Status:** Whether the region is **active (unblocked)** or **blocked**
-- **Region Name and Code**
-- **Ping Counts:** Succeeded vs. Failed pings
-- **Last Ping Status:** Succeeded or Failed
-- **Last Ping Latency**
-- **Packet Loss Percentage**
-
-The application also includes a live status panel that updates whenever you apply changes or restore default settings, so you always know what actions have been taken.
+**DBDRegionSelector** is a desktop GUI tool that lets you control which AWS regions Dead by Daylight can connect to. It provides real-time updates on region status (whether the region is active or blocked), ping success vs. failure rates, and latency and packet loss statistics. The tool also includes a live status panel that updates in real-time whenever you apply changes or restore default settings, ensuring you always know what actions have been taken.
 
 ## Installation
 
