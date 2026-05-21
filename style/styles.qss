@@ -1,24 +1,69 @@
-/* Global Window Styles */
-QWidget {
-	background-color: #1e1e1e;
+/* ---------------------- General ---------------------- */
+
+* {
 	color: #e0e0e0;
 	font-family: "Segoe UI", sans-serif;
 	font-size: 12px;
+}
+
+QWidget {
+	background-color: #1e1e1e;
 	outline: 0;
 }
 
-/* Label Styles */
-QLabel#regionsTitle,
-QLabel#statusTitle {
+QFrame {
+	background-color: #2c2c2c;
+	border: 1px solid #444;
+	border-radius: 4px;
+}
+
+QFrame QLabel {
+	background: transparent;
+	border: none;
+}
+
+QFrame QCheckBox {
+	background: transparent;
+	border: none;
+}
+
+/* ---------------------- Text ---------------------- */
+
+QLabel#currentRegionLabel {
 	color: #ff9b42;
 	font-size: 14px;
 }
 
-QLabel[centered="true"] {
-	padding: 2px;
+QLabel#headerLabel {
+	font-size: 13px;
 }
 
-/* Check Box Styles */
+QTextEdit#statusLog {
+	background-color: #1e1e1e;
+	border: 1px solid #444;
+	border-radius: 1px;
+	font-family: "Consolas", "Courier New", monospace;
+}
+
+/* ---------------------- Buttons ---------------------- */
+
+QPushButton {
+	background-color: #3a3a3a;
+	border: 1px solid #555;
+	border-radius: 4px;
+	padding: 5px 10px;
+}
+
+QPushButton:hover {
+	background-color: #464646;
+}
+
+QPushButton:pressed {
+	background-color: #353535;
+}
+
+/* ---------------------- Selection Controls ---------------------- */
+
 QCheckBox::indicator {
 	background-color: #3d3d3d;
 	border: 1px solid #444;
@@ -32,58 +77,21 @@ QCheckBox::indicator:checked {
 	border: 1px solid #e8893a;
 }
 
-/* Region Frame Styles */
-QFrame#regionFrame {
-	background-color: #2c2c2c;
-	border: 1px solid #444;
-	border-radius: 4px;
-}
+/* ---------------------- Scroll Bars ---------------------- */
 
-QFrame#regionFrame QLabel {
-	background: transparent;
-	border: none;
-}
-
-QFrame#regionFrame QCheckBox {
-	background: transparent;
-	border: none;
-}
-
-/* Push Button Styles */
-QPushButton {
-	background-color: #383838;
-	border: 1px solid #555;
-	border-radius: 4px;
-	padding: 5px 10px;
-}
-
-QPushButton:hover {
-	background-color: #4a4a4a;
-}
-
-QPushButton:pressed {
-	background-color: #5a5a5a;
-}
-
-/* Status Log Styles */
-QTextEdit#statusLog {
-	background-color: #2c2c2c;
-	border: 1px solid #444;
-	border-radius: 4px;
-	font-family: "Consolas", "Courier New", monospace;
-}
-
-/* Scroll Bar Styles */
 QScrollBar:vertical,
 QScrollBar:horizontal {
-	background: #2c2c2c;
+	background: #1e1e1e;
 	border: none;
+	height: 10px;
 	margin: 0;
+	width: 10px;
 }
 
 QScrollBar::handle:vertical,
 QScrollBar::handle:horizontal {
 	background: #565656;
+	min-height: 20px;
 }
 
 QScrollBar::add-line,

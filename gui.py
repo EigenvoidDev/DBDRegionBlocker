@@ -3,7 +3,7 @@ from datetime import datetime
 import os
 import sys
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
@@ -20,11 +20,14 @@ from PyQt6.QtWidgets import (
 
 import qasync
 
-from config import REGIONS
-from core import hosts_manager
-import core.region_latency_monitor as rlm
+from data.regions import REGIONS
+import services.hosts_manager as hosts_manager
+import services.region_latency_monitor as rlm
+from services.region_status_service import RegionStatusService
+from services.networking.packet_sniffer import PacketSniffer
+from services.networking.region_analyzer import RegionAnalyzer
 
-# ---------------------- Utilities ----------------------
+# ----------------- Utilities -----------------
 def resource_path(relative_path):
     if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
@@ -32,15 +35,13 @@ def resource_path(relative_path):
 
 
 def load_stylesheet(path):
-    with open(resource_path(path), "r", encoding="utf-8") as file:
-        stylesheet = file.read()
-    return stylesheet
+    with open(resource_path(path), "r", encoding="utf-8") as f:
+        return f.read()
 
 
-def create_centered_label(text=""):
+def create_label(text=""):
     label = QLabel(text)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    label.setProperty("centered", True)
     return label
 
 
@@ -71,9 +72,8 @@ def run_gui():
     app.setWindowIcon(QIcon(icon_path))
 
     window = QWidget()
-    window.setWindowTitle("DBD Region Selector v2.0.0")
+    window.setWindowTitle("DBD Region Blocker v3.0.0")
     window.setWindowIcon(QIcon(icon_path))
-
     window.setWindowFlags(
         Qt.WindowType.Window
         | Qt.WindowType.WindowTitleHint
@@ -81,72 +81,99 @@ def run_gui():
         | Qt.WindowType.WindowCloseButtonHint
         | Qt.WindowType.CustomizeWindowHint
     )
-
-    window.setFixedSize(1475, 685)
+    window.setFixedSize(1100, 900)
 
     # Load QSS Stylesheet
     qss = load_stylesheet("style/styles.qss")
     app.setStyleSheet(qss)
 
+    # Event Loop Setup
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
-    # ---------------------- Layouts ----------------------
-    main_layout = QHBoxLayout()
-    left_layout = QVBoxLayout()
-    right_layout = QVBoxLayout()
+    # Services
+    status_service = RegionStatusService()
+    analyzer = RegionAnalyzer()
 
-    # ---------------------- Left Side: Region Grid and Buttons ----------------------
-    regions_title = create_centered_label("Regions")
-    regions_title.setObjectName("regionsTitle")
-    left_layout.addWidget(regions_title)
+    # Async Bridges
+    async def fetch_status_async():
+        return await asyncio.to_thread(status_service.fetch_status)
+
+    # Feature Flags
+    sniffer_supported = PacketSniffer.supported
+
+    # ---------------------- Layouts ----------------------
+    main_layout = QVBoxLayout()
+
+    # Header Layout
+    header_frame = QFrame()
+    header_layout = QHBoxLayout()
+
+    current_region_label = create_label("Current Region: Unknown")
+    current_region_label.setObjectName("currentRegionLabel")
+
+    header_layout.addWidget(current_region_label)
+    header_frame.setLayout(header_layout)
+
+    main_layout.addWidget(header_frame)
 
     # Region Grid
+    region_frame = QFrame()
     region_grid = QGridLayout()
-    region_grid.setHorizontalSpacing(15)
-    region_grid.setVerticalSpacing(18)
+    region_grid.setVerticalSpacing(15)
 
     headers = [
         "Active",
         "Region Name",
         "Region",
+        "Online Status",
         "Succeeded",
         "Failed",
         "Last Ping Status",
         "Latency",
         "Packet Loss",
     ]
-    for col, header in enumerate(headers):
-        label = create_centered_label(header)
-        label.setProperty("header", True)
-        region_grid.addWidget(label, 0, col)
+
+    # Header Row
+    for column, header in enumerate(headers):
+        header_label = create_label(header)
+        header_label.setObjectName("headerLabel")
+        region_grid.addWidget(header_label, 0, column)
 
     checkboxes = {}
     labels = {}
 
-    for row, (region_name, region_data) in enumerate(REGIONS.items(), start=1):
+    # Data Rows
+    for row, (region_code, region_data) in enumerate(REGIONS.items(), start=1):
+        # Active Toggle
         checkbox = QCheckBox()
         region_grid.addWidget(checkbox, row, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-        checkboxes[region_name] = checkbox
+        checkboxes[region_code] = checkbox
 
-        region_grid.addWidget(create_centered_label(region_name), row, 1)
-        region_grid.addWidget(create_centered_label(region_data["region"]), row, 2)
+        # Identity
+        region_grid.addWidget(create_label(region_data["name"]), row, 1)
+        region_grid.addWidget(create_label(region_code), row, 2)
 
-        succeeded_label = create_centered_label("0")
-        failed_label = create_centered_label("0")
-        last_ping_status_label = create_centered_label(
-            rlm.PingStatus.INITIALIZING.value
-        )
-        latency_label = create_centered_label("N/A")
-        packet_loss_label = create_centered_label("0%")
+        # Online Status
+        online_status_label = create_label("Unknown")
+        region_grid.addWidget(online_status_label, row, 3)
 
-        region_grid.addWidget(succeeded_label, row, 3)
-        region_grid.addWidget(failed_label, row, 4)
-        region_grid.addWidget(last_ping_status_label, row, 5)
-        region_grid.addWidget(latency_label, row, 6)
-        region_grid.addWidget(packet_loss_label, row, 7)
+        # Ping Statistics
+        succeeded_label = create_label("0")
+        failed_label = create_label("0")
+        last_ping_status_label = create_label(rlm.PingStatus.INITIALIZING.value)
+        latency_label = create_label("N/A")
+        packet_loss_label = create_label("0%")
 
-        labels[region_name] = {
+        region_grid.addWidget(succeeded_label, row, 4)
+        region_grid.addWidget(failed_label, row, 5)
+        region_grid.addWidget(last_ping_status_label, row, 6)
+        region_grid.addWidget(latency_label, row, 7)
+        region_grid.addWidget(packet_loss_label, row, 8)
+
+        # Store references for live updates
+        labels[region_code] = {
+            "online_status": online_status_label,
             "succeeded": succeeded_label,
             "failed": failed_label,
             "last_ping_status": last_ping_status_label,
@@ -154,132 +181,189 @@ def run_gui():
             "packet_loss": packet_loss_label,
         }
 
-    region_frame = QFrame()
-    region_frame.setObjectName("regionFrame")
     region_frame.setLayout(region_grid)
-    left_layout.addWidget(region_frame)
-    left_layout.addStretch()
+    main_layout.addWidget(region_frame)
 
-    # Buttons
-    button_layout = QHBoxLayout()
+    # Buttons Layout
+    buttons_layout = QHBoxLayout()
+
     apply_changes_button = QPushButton("Apply Changes")
     restore_defaults_button = QPushButton("Restore Defaults")
-    button_layout.addWidget(apply_changes_button)
-    button_layout.addWidget(restore_defaults_button)
-    left_layout.addLayout(button_layout)
 
-    # ---------------------- Right Side: Status Log ----------------------
-    status_title = create_centered_label("Status")
-    status_title.setObjectName("statusTitle")
-    right_layout.addWidget(status_title)
+    buttons_layout.addWidget(apply_changes_button)
+    buttons_layout.addWidget(restore_defaults_button)
 
+    main_layout.addLayout(buttons_layout)
+
+    # Status Log
     status_log = QTextEdit()
     status_log.setReadOnly(True)
     status_log.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
     status_log.setObjectName("statusLog")
-    right_layout.addWidget(status_log)
-
-    # ---------------------- Final Layout ----------------------
-    main_layout.addLayout(left_layout)
-    main_layout.addLayout(right_layout)
+    main_layout.addWidget(status_log)
 
     window.setLayout(main_layout)
 
-    # ---------------------- Hosts File Operations ----------------------
-    # Initialize hosts file
-    if hosts_manager.initialize_hosts_file():
+    # ---------------------- Packet Sniffer Support Notice ----------------------
+    if not sniffer_supported:
+        append_status(
+            status_log,
+            PacketSniffer.UNSUPPORTED_MESSAGE,
+            QColor("#ffa500"),
+        )
+
+    # ---------------------- Hosts File Initialization ----------------------
+    result = hosts_manager.initialize_hosts_file()
+
+    if result:
         append_status(
             status_log, "Hosts file initialized successfully.", QColor("#4caf50")
         )
     else:
         append_status(
             status_log,
-            "Failed to initialize hosts file. Run as administrator.",
+            "Failed to initialize hosts file. Please run the application as an administrator.",
             QColor("#ff5555"),
         )
 
-    # Sync checkboxes with hosts file
+    # ---------------------- Checkbox Sync ----------------------
     def sync_checkboxes():
         try:
-            with open(hosts_manager.get_hosts_path(), "r", encoding="utf-8") as f:
-                in_block = False
-                for line in f:
-                    stripped = line.strip()
-                    if stripped == hosts_manager.HOSTS_SECTION_START:
-                        in_block = True
-                        continue
-                    elif stripped == hosts_manager.HOSTS_SECTION_END:
-                        break
-                    if in_block:
-                        for region_name, checkbox in checkboxes.items():
-                            hostname = hosts_manager.REGIONS[region_name][
-                                "udp_ping_beacon_endpoint"
-                            ]
-                            if f"# 0.0.0.0 {hostname}" in stripped:
-                                checkbox.setChecked(True)
-                            elif f"0.0.0.0 {hostname}" in stripped:
-                                checkbox.setChecked(False)
+            config = hosts_manager.load_config()
+            regions = config.get("regions", {})
+
+            for region_code, checkbox in checkboxes.items():
+                checkbox.setChecked(not regions.get(region_code, False))
+
+            append_status(status_log, hosts_manager.MESSAGES["OK"], QColor("#4caf50"))
+
         except PermissionError:
             append_status(
                 status_log,
-                "Cannot read hosts file. Run as administrator.",
+                hosts_manager.MESSAGES["PERMISSION_ERROR"],
                 QColor("#ff5555"),
             )
-        except FileNotFoundError:
-            append_status(status_log, "Hosts file not found.", QColor("#ff5555"))
+
+        except Exception:
+            append_status(
+                status_log,
+                "Configuration file is invalid or inaccessible. Default configuration loaded.",
+                QColor("#ffa500"),
+            )
 
     sync_checkboxes()
 
+    # ---------------------- Configuration Control ----------------------
     def apply_changes():
-        active = [name for name, checkbox in checkboxes.items() if checkbox.isChecked()]
-        status = hosts_manager.update_hosts_file(
-            active_regions=active, all_regions_active=False
-        )
-        if status.name in ("UPDATE_SUCCESS", "ALREADY_UP_TO_DATE"):
+        try:
+            for region_code, checkbox in checkboxes.items():
+                hosts_manager.set_region_block(region_code, not checkbox.isChecked())
+
+            result = hosts_manager.apply_config_to_hosts()
+
+            if result == hosts_manager.HostsUpdateStatus.SUCCESS:
+                append_status(
+                    status_log, hosts_manager.MESSAGES["SUCCESS"], QColor("#4caf50")
+                )
+
+            elif result == hosts_manager.HostsUpdateStatus.NO_CHANGES:
+                append_status(
+                    status_log, hosts_manager.MESSAGES["NO_CHANGES"], QColor("#ffa500")
+                )
+
+            elif result == hosts_manager.HostsUpdateStatus.PERMISSION_ERROR:
+                append_status(
+                    status_log,
+                    hosts_manager.MESSAGES["PERMISSION_ERROR"],
+                    QColor("#ff5555"),
+                )
+
+            else:
+                append_status(
+                    status_log, hosts_manager.MESSAGES["WRITE_ERROR"], QColor("#ff5555")
+                )
+
+        except Exception:
             append_status(
                 status_log,
-                "Hosts file updated successfully. Restart Dead by Daylight for changes to take effect.",
-                QColor("#4caf50"),
+                "Unexpected error while applying configuration.",
+                QColor("#ff5555"),
             )
-        elif status.name == "PERMISSION_ERROR":
-            append_status(
-                status_log, "Permission error: Run as administrator.", QColor("#ff5555")
-            )
-        elif status.name == "WRITE_ERROR":
-            append_status(
-                status_log, "Failed to write to hosts file.", QColor("#ff5555")
-            )
-        sync_checkboxes()
 
     def restore_defaults():
-        status = hosts_manager.update_hosts_file(
-            active_regions=[], all_regions_active=True
-        )
-        if status.name in ("UPDATE_SUCCESS", "ALREADY_UP_TO_DATE"):
+        try:
+            for region_code, checkbox in checkboxes.items():
+                checkbox.setChecked(True)
+                hosts_manager.set_region_block(region_code, False)
+
+            result = hosts_manager.apply_config_to_hosts()
+
+            if result == hosts_manager.HostsUpdateStatus.SUCCESS:
+                append_status(
+                    status_log,
+                    "Hosts file restored to default configuration. Restart Dead by Daylight for changes to apply.",
+                    QColor("#4caf50"),
+                )
+
+            elif result == hosts_manager.HostsUpdateStatus.NO_CHANGES:
+                append_status(
+                    status_log, hosts_manager.MESSAGES["NO_CHANGES"], QColor("#ffa500")
+                )
+
+            elif result == hosts_manager.HostsUpdateStatus.PERMISSION_ERROR:
+                append_status(
+                    status_log,
+                    hosts_manager.MESSAGES["PERMISSION_ERROR"],
+                    QColor("#ff5555"),
+                )
+
+            else:
+                append_status(
+                    status_log, hosts_manager.MESSAGES["WRITE_ERROR"], QColor("#ff5555")
+                )
+
+        except Exception:
             append_status(
                 status_log,
-                "Hosts file restored to default configuration. Restart Dead by Daylight for changes to take effect.",
-                QColor("#4caf50"),
-            )
-            sync_checkboxes()
-        elif status.name == "PERMISSION_ERROR":
-            append_status(
-                status_log, "Permission error: Run as administrator.", QColor("#ff5555")
-            )
-        elif status.name == "WRITE_ERROR":
-            append_status(
-                status_log, "Failed to write to hosts file.", QColor("#ff5555")
+                "Unexpected error while restoring defaults.",
+                QColor("#ff5555"),
             )
 
     apply_changes_button.clicked.connect(apply_changes)
     restore_defaults_button.clicked.connect(restore_defaults)
 
-    # ---------------------- Async Ping Updates ----------------------
+    # ---------------------- Region Status Service ----------------------
+    async def update_region_online_status():
+        data = await fetch_status_async()
+
+        for region_code, label in labels.items():
+            state = data.get(region_code)
+
+            if state is True:
+                label["online_status"].setText("Online")
+
+            elif state is False:
+                label["online_status"].setText("Offline")
+
+            else:
+                label["online_status"].setText("Unknown")
+
+    def trigger_region_online_status_update():
+        asyncio.create_task(update_region_online_status())
+
+    # ---------------------- Region Latency Monitor ----------------------
     results = {}
     ping_tasks = []
 
-    def get_ping_status_color(ping_status_enum, latency=None):
-        # Default Color
+    # Monitor Initialization
+    async def start_region_latency_monitor():
+        nonlocal results, ping_tasks
+        results, ping_tasks = await rlm.ping_all_regions_continuous()
+
+    loop.create_task(start_region_latency_monitor())
+
+    # Latency Color Mapping
+    def get_ping_quality_color(ping_status_enum, latency=None):
         color = "#e0e0e0"
 
         if ping_status_enum == rlm.PingStatus.SUCCEEDED and latency is not None:
@@ -289,63 +373,115 @@ def run_gui():
                 rlm.LatencyQuality.BAD: "#ff5555",
             }
             color = quality_colors.get(rlm.classify_latency(latency), color)
+
         elif ping_status_enum == rlm.PingStatus.ERROR:
             color = "#9e9e9e"
 
         return color
 
-    def refresh_region_stats():
-        for region_name, stat_labels in labels.items():
-            data = results.get(region_name)
-            if not data:
+    # Latency UI Refresh
+    def update_latency_ui():
+        for region_code, label_set in labels.items():
+            data = results.get(region_code)
+            if data is None:
                 continue
 
-            # Basic Stats
-            stat_labels["succeeded"].setText(str(data.get("succeeded_count", 0)))
-            stat_labels["failed"].setText(str(data.get("failed_count", 0)))
+            succeeded = data.succeeded_count
+            label_set["succeeded"].setText(str(succeeded))
 
-            ping_status_enum = data.get("last_ping_status", rlm.PingStatus.INITIALIZING)
-            stat_labels["last_ping_status"].setText(
-                ping_status_enum.value
-                if isinstance(ping_status_enum, rlm.PingStatus)
-                else str(ping_status_enum)
-            )
+            failed = data.failed_count
+            label_set["failed"].setText(str(failed))
 
-            latency = data.get("last_ping_latency")
-            stat_labels["latency"].setText(
+            last_ping_status = data.last_ping_status or rlm.PingStatus.INITIALIZING
+            label_set["last_ping_status"].setText(last_ping_status.value)
+
+            latency = data.last_ping_latency
+            label_set["latency"].setText(
                 f"{latency:.0f}ms" if latency is not None else "N/A"
             )
-            packet_loss = data.get("packet_loss_percentage", 0.0)
-            stat_labels["packet_loss"].setText(f"{packet_loss:.2f}%")
 
-            # Apply color based on latency quality
-            color = get_ping_status_color(ping_status_enum, latency)
-            stat_labels["latency"].setStyleSheet(f"color: {color}")
+            packet_loss = data.packet_loss_percentage
+            label_set["packet_loss"].setText(f"{packet_loss:.2f}%")
 
-    timer = QTimer()
-    timer.timeout.connect(refresh_region_stats)
-    timer.start(5000)
+            color = get_ping_quality_color(last_ping_status, latency)
+            label_set["latency"].setStyleSheet(f"color: {color}")
 
-    # Launch asynchronous tasks to continuously ping all regions
-    async def start_continuous_pings():
-        nonlocal ping_tasks
-        ping_tasks = await rlm.ping_all_regions_continuous(results)
+    # ---------------------- Event Handlers ----------------------
+    class SignalBridge(QObject):
+        server_detected = pyqtSignal(str, str)
 
-    asyncio.ensure_future(start_continuous_pings())
+    bridge = SignalBridge()
 
-    # Window Close Handler
-    def on_close(event):
+    def update_current_region_label(server, region):
+        if not server or not region:
+            current_region_label.setText("Current Region: Unknown")
+        else:
+            current_region_label.setText(f"Current Region: {region} ({server})")
+
+    bridge.server_detected.connect(update_current_region_label)
+
+    def on_server_detected(server, region):
+        bridge.server_detected.emit(server, region)
+
+    analyzer.on_server_detected = on_server_detected
+
+    # ---------------------- Background Tasks ----------------------
+    async def run_analyzer():
+        await asyncio.to_thread(analyzer.run)
+
+    analyzer_task = loop.create_task(run_analyzer())
+
+    # ---------------------- Game Running State Change Detection ----------------------
+    last_game_state = None
+
+    def update_analyzer_log():
+        nonlocal last_game_state
+
+        game_running = analyzer.game_active
+
+        if game_running != last_game_state:
+            last_game_state = game_running
+
+            if game_running:
+                append_status(
+                    status_log, "Dead by Daylight detected!", QColor("#4caf50")
+                )
+            else:
+                append_status(
+                    status_log,
+                    "Waiting for Dead by Daylight to start...",
+                    QColor("#e0e0e0"),
+                )
+
+    # ---------------------- UI Update Timers ----------------------
+    latency_ui_timer = QTimer()
+    latency_ui_timer.timeout.connect(update_latency_ui)
+    latency_ui_timer.start(1000)
+
+    analyzer_log_timer = QTimer()
+    analyzer_log_timer.timeout.connect(update_analyzer_log)
+    analyzer_log_timer.start(2000)
+
+    region_online_status_timer = QTimer()
+    region_online_status_timer.timeout.connect(trigger_region_online_status_update)
+    region_online_status_timer.start(5000)
+
+    # ---------------------- Clean Exit ----------------------
+    def close_event(event):
+        hosts_manager.reset_hosts_on_exit()
+        analyzer.stop()
+
         for task in ping_tasks:
             task.cancel()
 
-        async def cleanup():
-            await asyncio.gather(*ping_tasks, return_exceptions=True)
+        analyzer_task.cancel()
 
-        asyncio.ensure_future(cleanup())
-
+        loop.call_soon(loop.stop)
         event.accept()
 
-    window.closeEvent = on_close
+    window.closeEvent = close_event
 
     window.show()
-    loop.run_forever()
+
+    with loop:
+        loop.run_forever()
