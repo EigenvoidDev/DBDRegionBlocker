@@ -2,7 +2,7 @@
 
 [Dead by Daylight](https://deadbydaylight.com/) is an online asymmetric multiplayer survival horror video game developed and published by Canadian studio [Behaviour Interactive](https://www.bhvr.com/).
 
-**DBDRegionBlocker** is a desktop GUI tool that lets you selectively block or allow Dead by Daylight AWS regions. It provides real-time detection of the active match server, along with region availability status and live network metrics including ping reliability, last ping status, latency, and packet loss.
+**DBDRegionBlocker** is a desktop GUI tool that lets you selectively block or allow Dead by Daylight AWS regions. It provides real-time detection of the active match server, along with region availability and live network metrics including latency, packet loss, ping reliability, and last ping status.
 
 ## Installation
 
@@ -24,7 +24,7 @@ python main.py
 
 **Note:** This application requires administrator (or root) privileges to perform packet capture and modify the system `hosts` file.
 - **Windows:** Run the terminal as an administrator before executing the script.
-- **macOS/Linux**: Run the script with `sudo`:
+- **macOS/Linux:** Run the script with `sudo`:
 ```
 sudo python3 main.py
 ```
@@ -47,7 +47,7 @@ Some antivirus software may also flag the application as suspicious or block the
 - **Apply Changes:** Applies the current region configuration and updates the `hosts` file.
 - **Restore Defaults:** Resets all regions to allowed (checked) and updates the `hosts` file.
 - **Automatic Detection:** The application automatically detects when Dead by Daylight is running and identifies the active match server in real time using packet capture.
-- **Status Log:** Displays live updates for application events such as applying changes, restoring defaults, and Dead by Daylight running status updates.
+- **Status Log:** Displays live updates for application events such as applying changes, restoring defaults, and game status updates.
 
 ## Region Availability
 
@@ -72,17 +72,19 @@ To reduce the chances of connecting to N. Virginia game servers:
 
 ## Limitations
 
-- Requires an active internet connection for:
-  - Fetching AWS region availability data
-  - Resolving AWS region data
-  - Performing region status checks and latency/ping measurements
-  - Packet-based server detection for identifying the active match server IP address
+- **Internet connection required** for:
+  - Fetching region availability data
+  - Fetching AWS IP range data used for region resolution
+  - Performing latency measurements and connectivity checks for regions
+  - Detecting the active match server IP address via packet-based analysis
 
-- The application must remain running for region blocking and server detection to function correctly.
+- The application must remain running for server detection to function. Region blocking is applied during login and persists until the game is restarted, so the application can be closed after login and reopened before restarting the game.
 
-- Packet capture functionality is only supported on Windows.
+- **Packet capture is currently supported on Windows only**.
 
-- The application may occasionally not fully terminate on exit, leaving a background process running. This is rare and does not affect functionality. If this occurs, the process can be manually terminated via Task Manager (Windows) or `kill <pid>` (macOS/Linux). This does not affect future runs of the application.
+- In rare cases, the application may not fully terminate on exit, leaving a background process running.
+  - This does not affect functionality or future runs.
+  - If needed, terminate it manually via Task Manager (Windows) or `kill <pid>` (macOS/Linux).
 
 ## Supported Regions
 
