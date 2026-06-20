@@ -58,7 +58,10 @@ def get_config_path():
 
 
 def create_default_config():
-    return {"regions": {code: False for code in REGIONS.keys()}}
+    return {
+        "regions": {code: False for code in REGIONS.keys()},
+        "packet_sniffer_enabled": True,
+    }
 
 
 def load_config():
@@ -71,7 +74,23 @@ def load_config():
 
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            config = json.load(f)
+
+        changed = False
+
+        if "regions" not in config:
+            config["regions"] = {code: False for code in REGIONS.keys()}
+            changed = True
+
+        if "packet_sniffer_enabled" not in config:
+            config["packet_sniffer_enabled"] = True
+            changed = True
+
+        if changed:
+            save_config(config)
+
+        return config
+
     except (OSError, json.JSONDecodeError):
         config = create_default_config()
         save_config(config)
@@ -132,22 +151,6 @@ class HostsReadStatus(Enum):
     PERMISSION_ERROR = 2
     READ_ERROR = 3
 
-
-# ========================
-# User Messaging
-# ========================
-
-MESSAGES = {
-    # ---- Update / Write Flow ----
-    "SUCCESS": "Hosts file updated successfully. Restart Dead by Daylight for changes to apply.",
-    "NO_CHANGES": "No changes were needed.",
-    "WRITE_ERROR": "Unable to write to hosts file.",
-    # ---- Read Flow ----
-    "OK": "Hosts file loaded successfully.",
-    "READ_ERROR": "Unable to read hosts file.",
-    # ---- System / Permission ----
-    "PERMISSION_ERROR": "Administrator privileges required. Please run the application as an administrator.",
-}
 
 # ========================
 # Hosts Section Management
@@ -292,6 +295,22 @@ def initialize_hosts_file():
 def set_region_block(region_code, is_blocked):
     config = load_config()
     config["regions"][region_code] = is_blocked
+    save_config(config)
+
+
+# ========================
+# Packet Sniffer Settings
+# ========================
+
+
+def get_packet_sniffer_enabled():
+    config = load_config()
+    return config.get("packet_sniffer_enabled", True)
+
+
+def set_packet_sniffer_enabled(enabled):
+    config = load_config()
+    config["packet_sniffer_enabled"] = enabled
     save_config(config)
 
 

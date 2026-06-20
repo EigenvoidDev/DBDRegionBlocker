@@ -2,7 +2,7 @@
 
 [Dead by Daylight](https://deadbydaylight.com/) is an online asymmetric multiplayer survival horror video game developed and published by Canadian studio [Behaviour Interactive](https://www.bhvr.com/).
 
-**DBDRegionBlocker** is a desktop GUI tool that lets you selectively block or allow Dead by Daylight AWS regions. It provides real-time detection of the active match server, along with region availability and live network metrics including latency, packet loss, ping reliability, and last ping status.
+**DBDRegionBlocker** is a desktop GUI tool that lets you selectively block or allow Dead by Daylight AWS regions. It provides real-time match server detection, region availability status, and live network metrics including latency, packet loss, ping reliability, and last ping status.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Finally, start the application:
 python main.py
 ```
 
-**Note:** This application requires administrator (or root) privileges to perform packet capture and modify the system `hosts` file.
+**Note:** This application requires administrator (or root) privileges to modify the system `hosts` file and perform packet capture.
 - **Windows:** Run the terminal as an administrator before executing the script.
 - **macOS/Linux:** Run the script with `sudo`:
 ```
@@ -46,12 +46,13 @@ Some antivirus software may also flag the application as suspicious or block the
 - **Region Control:** Each region has a checkbox under the **Active** column. Checked regions are allowed, while unchecked regions are blocked.
 - **Apply Changes:** Applies the current region configuration and updates the `hosts` file.
 - **Restore Defaults:** Resets all regions to allowed (checked) and updates the `hosts` file.
-- **Automatic Detection:** The application automatically detects when Dead by Daylight is running and identifies the active match server in real time using packet capture.
-- **Status Log:** Displays live updates for application events such as applying changes, restoring defaults, and game status updates.
+- **Game Detection:** Automatically detects when Dead by Daylight is running.
+- **Packet Capture:** Enables or disables real-time match server detection.
+- **Status Log:** Displays live updates for application events such as applying changes, restoring defaults, game detection events, and packet capture state (enabled/disabled).
 
 ## Region Availability
 
-Region availability status is retrieved from the [Dead by Queue Regions API](https://api2.deadbyqueue.com/regions) and indicates whether a region is currently online or offline.
+Region availability is retrieved from the [Dead by Queue Regions API](https://api2.deadbyqueue.com/regions) and indicates whether a region is currently online or offline.
 
 This information is updated periodically and displayed alongside each region in the application.
 
@@ -61,29 +62,23 @@ This information is updated periodically and displayed alongside each region in 
 Dead by Daylight determines which regions you can connect to when you log in based on your latency to all available regions. The game will only select from regions you have allowed in this application, prioritizing those with the lowest latency.
 
 ### Blocking All Regions
-If you block all regions, Dead by Daylight will still estimate your latency to each region using your location data and select one for matchmaking based on those estimates.
+If you block all regions, Dead by Daylight will still select a matchmaking region based on latency estimates using your location data.
 
 ### US East (N. Virginia) Region Behavior
-Even if you block **US East (N. Virginia)**, the game may still route some connections through this region because both **Easy Anti-Cheat (EAC)** and **RTM services** are hosted there. As a result, N. Virginia cannot be fully blocked without affecting core game functionality.
-
-To reduce the chances of connecting to N. Virginia game servers:
-- Block nearby regions that are more likely to be selected by the matchmaking system.
-- Retry matchmaking until you are placed in a different region.
+Even if you block **US East (N. Virginia)**, some game-related traffic may still be routed through this region because certain services, including **Easy Anti-Cheat (EAC)** and **RTM** infrastructure, are hosted there. While this does not necessarily affect matchmaking region selection, N. Virginia cannot be completely blocked without impacting core game functionality.
 
 ## Limitations
 
-- **Internet connection required** for:
-  - Fetching region availability data
-  - Fetching AWS IP range data used for region resolution
-  - Performing latency measurements and connectivity checks for regions
-  - Detecting the active match server IP address via packet-based analysis
+- **Internet connection required for:**
+  - Region availability data
+  - AWS IP range data used for region resolution
+  - Latency measurements and connectivity checks
+  - Match server detection
 
-- The application must remain running for server detection to function. Region blocking is applied during login and persists until the game is restarted, so the application can be closed after login and reopened before restarting the game.
-
-- **Packet capture is currently supported on Windows only**.
+- Packet capture is only supported on Windows.
 
 - In rare cases, the application may not fully terminate on exit, leaving a background process running.
-  - This does not affect functionality or future runs.
+  - This does not affect functionality or future runs of the application.
   - If needed, terminate it manually via Task Manager (Windows) or `kill <pid>` (macOS/Linux).
 
 ## Supported Regions

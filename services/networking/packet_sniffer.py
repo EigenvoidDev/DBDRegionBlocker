@@ -2,20 +2,20 @@ import sys
 
 
 class PacketSniffer:
-    UNSUPPORTED_MESSAGE = "Packet sniffing is only supported on Windows."
-    supported = sys.platform == "win32"
+    SUPPORTED = sys.platform == "win32"
 
     def __init__(self, filter_expr="outbound and udp"):
         self.filter_expr = filter_expr
         self.handle = None
         self.pydivert = None
 
-        if self.supported:
+        if self.SUPPORTED:
             import pydivert
+
             self.pydivert = pydivert
 
     def __enter__(self):
-        if not self.supported:
+        if not self.SUPPORTED:
             return self
 
         self.handle = self.pydivert.WinDivert(self.filter_expr)
@@ -31,7 +31,7 @@ class PacketSniffer:
             self.handle = None
 
     def __iter__(self):
-        if not self.supported:
+        if not self.SUPPORTED:
             raise RuntimeError(self.UNSUPPORTED_MESSAGE)
 
         if self.handle is None:
@@ -40,7 +40,7 @@ class PacketSniffer:
         return iter(self.handle)
 
     def send(self, packet):
-        if not self.supported:
+        if not self.SUPPORTED:
             return
 
         handle = self.handle

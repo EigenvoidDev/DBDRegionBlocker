@@ -39,12 +39,3 @@ class RegionStatusService:
 
         except (requests.RequestException, ValueError):
             return self._cache or {}
-
-    def get_split(self):
-        data = self.fetch_status()
-
-        online = {region: status for region, status in data.items() if status is True}
-
-        offline = {region: status for region, status in data.items() if status is False}
-
-        return online, offline

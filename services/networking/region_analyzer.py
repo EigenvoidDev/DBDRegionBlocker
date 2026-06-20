@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import ipaddress
 import queue
 import threading
@@ -10,40 +11,119 @@ from .packet_sniffer import PacketSniffer
 from .session_tracker import SessionTracker
 
 
+@dataclass
 class AnalyzerState:
-    def __init__(self, is_game_running, server_ip, region_code):
-        self.is_game_running = is_game_running
-        self.server_ip = server_ip
-        self.region_code = region_code
+    game_active: bool
+    current_server_ip: str | None
+    current_region: str | None
 
 
 class RegionAnalyzer:
     def __init__(self):
+        # Core Services
         self.resolver = AWSRegionResolver()
         self.tracker = SessionTracker()
 
+        # Shared Resources
         self.packet_queue = queue.Queue(maxsize=10000)
 
+        # Current State
         self.game_active = False
         self.current_server_ip = None
         self.current_region = None
 
+        # Callbacks
         self.on_server_detected = None
+        self.on_sniffer_state = None
 
+        # Analyzer State
         self._running = False
+
+        # Game Detection
+        self._game_thread = None
+        self._game_stop_event = threading.Event()
+
+        # Packet Sniffer
+        self._sniffer_supported = PacketSniffer.SUPPORTED
+        self.sniffer_enabled = False
+        self._sniffer_start_requested = False
+
         self._sniffer_thread = None
         self._sniffer = None
 
-        self._last_game_check = 0
-        self._game_check_interval = 1.0
+    # ----------------- Game Detection -----------------
+    def _game_worker(self):
+        last_state = None
 
-        self._sniffer_supported = PacketSniffer.supported
+        while not self._game_stop_event.is_set():
+            running = False
 
-    # ----------------- Lifecycle -----------------
-    def stop(self):
-        self._running = False
+            for proc in psutil.process_iter(["name"]):
+                try:
+                    if "DeadByDaylight" in (proc.info["name"] or ""):
+                        running = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
 
-        if self._sniffer and self._sniffer.handle is not None:
+            if running != last_state:
+                self.game_active = running
+                last_state = running
+
+                self.tracker.reset()
+
+                if not running:
+                    self.current_server_ip = None
+                    self.current_region = None
+
+                    if callable(self.on_server_detected):
+                        self.on_server_detected("", "")
+
+            time.sleep(1.0)
+
+    def _start_game_thread(self):
+        if self._game_thread and self._game_thread.is_alive():
+            return
+
+        self._game_stop_event.clear()
+
+        self._game_thread = threading.Thread(
+            target=self._game_worker,
+            daemon=True,
+        )
+        self._game_thread.start()
+
+    def _stop_game_thread(self):
+        self._game_stop_event.set()
+
+    # ----------------- Sniffer Control -----------------
+    def enable_sniffer(self):
+        if not self._sniffer_supported or self.sniffer_enabled:
+            return False
+
+        self.sniffer_enabled = True
+
+        if not self._running:
+            self._sniffer_start_requested = True
+            return True
+
+        self._reset_state()
+        self._start_sniffer_thread()
+        return True
+
+    def disable_sniffer(self):
+        if not self.sniffer_enabled and not self._sniffer_thread:
+            return False
+
+        self.sniffer_enabled = False
+        self._sniffer_start_requested = False
+
+        self._reset_state()
+
+        if callable(self.on_server_detected):
+            self.on_server_detected("", "")
+
+        if self._sniffer and self._sniffer.handle:
             try:
                 self._sniffer.handle.close()
             except Exception:
@@ -55,75 +135,77 @@ class RegionAnalyzer:
         self._sniffer_thread = None
         self._sniffer = None
 
-    # ----------------- Game Detection -----------------
-    def is_game_running(self):
-        now = time.monotonic()
+        return True
 
-        if now - self._last_game_check < self._game_check_interval:
-            return self.game_active
+    def _reset_state(self):
+        self.tracker = SessionTracker()
+        self.packet_queue = queue.Queue(maxsize=10000)
 
-        self._last_game_check = now
+        self.current_server_ip = None
+        self.current_region = None
 
-        running = False
+    def _start_sniffer_thread(self):
+        if not self._running:
+            return
 
-        for proc in psutil.process_iter(["name"]):
-            try:
-                if "DeadByDaylight" in (proc.info["name"] or ""):
-                    running = True
-                    break
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+        if self._sniffer_thread and self._sniffer_thread.is_alive():
+            return
 
-        self.game_active = running
-        return running
+        self._sniffer_thread = threading.Thread(
+            target=self._sniffer_worker,
+            daemon=True,
+        )
+        self._sniffer_thread.start()
 
-    # ----------------- Sniffer Thread -----------------
+    # ----------------- Sniffer Worker -----------------
     def _sniffer_worker(self):
-        print("[PacketSniffer] Started")
-
         if not self._sniffer_supported:
             return
+
+        print("[PacketSniffer] Started")
 
         try:
             with PacketSniffer() as sniffer:
                 self._sniffer = sniffer
 
-                try:
-                    for packet in sniffer:
-                        if not self._running:
-                            break
+                if callable(self.on_sniffer_state):
+                    self.on_sniffer_state(True)
 
-                        try:
-                            sniffer.send(packet)
+                for packet in sniffer:
+                    if not self._running or not self.sniffer_enabled:
+                        break
 
-                            if packet.is_outbound and packet.udp:
-                                ip = packet.dst_addr
+                    try:
+                        sniffer.send(packet)
 
+                        if packet.is_outbound and packet.udp:
+                            ip = packet.dst_addr
+
+                            try:
+                                self.packet_queue.put_nowait(ip)
+                            except queue.Full:
                                 try:
-                                    self.packet_queue.put_nowait(ip)
-                                except queue.Full:
-                                    try:
-                                        self.packet_queue.get_nowait()
-                                    except queue.Empty:
-                                        pass
+                                    self.packet_queue.get_nowait()
+                                except queue.Empty:
+                                    pass
+                                self.packet_queue.put_nowait(ip)
 
-                                    try:
-                                        self.packet_queue.put_nowait(ip)
-                                    except queue.Full:
-                                        pass
+                    except Exception as e:
+                        print(f"[PacketSniffer] Packet Error: {e}")
 
-                        except Exception as e:
-                            print(f"[PacketSniffer] Packet Error: {e}")
-
-                except (OSError, RuntimeError) as e:
-                    if getattr(e, "winerror", None) != 995:
-                        print(f"[PacketSniffer] Capture Error: {e}")
+        except (OSError, RuntimeError) as e:
+            if getattr(e, "winerror", None) != 995:
+                print(f"[PacketSniffer] Capture Error: {e}")
 
         finally:
-            print("[PacketSniffer] Stopped")
             self._sniffer = None
 
-    # ----------------- Main Runtime Loop -----------------
+            if callable(self.on_sniffer_state):
+                self.on_sniffer_state(False)
+
+            print("[PacketSniffer] Stopped")
+
+    # ----------------- Main Loop -----------------
     def run(self):
         if self._running:
             print("[RegionAnalyzer] Already running")
@@ -132,85 +214,64 @@ class RegionAnalyzer:
         print("[RegionAnalyzer] Started")
 
         self._running = True
-
         self.resolver.load()
 
-        if self._sniffer_supported:
-            self._sniffer_thread = threading.Thread(target=self._sniffer_worker)
-            self._sniffer_thread.start()
+        self._start_game_thread()
+
+        if self.sniffer_enabled or self._sniffer_start_requested:
+            self._sniffer_start_requested = False
+            self._start_sniffer_thread()
 
         try:
             while self._running:
-
                 try:
                     ip = self.packet_queue.get(timeout=0.5)
                 except queue.Empty:
-                    ip = None
+                    continue
+
+                if not self.game_active:
+                    continue
 
                 try:
-                    # ----------------- Game State -----------------
-                    previous = self.game_active
-                    running = self.is_game_running()
-
-                    if running != previous:
-                        self.tracker.reset()
-
-                        if not running:
-                            self.current_server_ip = None
-                            self.current_region = None
-
-                            if callable(self.on_server_detected):
-                                self.on_server_detected("", "")
-
-                    if not running:
+                    if ipaddress.ip_address(ip).version != 4:
                         continue
+                except ValueError:
+                    continue
 
-                    if ip is None:
-                        continue
+                packet_region = self.resolver.get_region(ip)
+                if not packet_region:
+                    continue
 
-                    # ----------------- IP Validation -----------------
-                    try:
-                        if ipaddress.ip_address(ip).version != 4:
-                            continue
-                    except ValueError:
-                        continue
+                self.tracker.observe(ip)
 
-                    # ----------------- Region Filtering -----------------
-                    packet_region = self.resolver.get_region(ip)
+                server = self.tracker.evaluate_current_server()
+                if not server:
+                    continue
 
-                    if not packet_region:
-                        continue
+                server_region = self.resolver.get_region(server)
 
-                    # ----------------- Session Tracking -----------------
-                    self.tracker.observe(ip)
+                if server != self.current_server_ip:
+                    self.current_server_ip = server
+                    self.current_region = server_region
 
-                    server = self.tracker.update()
+                    print(
+                        f"[RegionAnalyzer] Detected server: {server} ({server_region})"
+                    )
 
-                    if not server:
-                        continue
-
-                    server_region = self.resolver.get_region(server)
-
-                    # ----------------- State Update -----------------
-                    if server != self.current_server_ip:
-                        self.current_server_ip = server
-                        self.current_region = server_region
-
-                        print(
-                            f"[RegionAnalyzer] Detected server: {server} ({server_region})"
-                        )
-
-                        if callable(self.on_server_detected):
-                            self.on_server_detected(server, server_region)
-
-                except Exception as e:
-                    print(f"[RegionAnalyzer] Error: {e}")
+                    if callable(self.on_server_detected):
+                        self.on_server_detected(server, server_region)
 
         finally:
-            self._running = False
+            self.stop()
             print("[RegionAnalyzer] Stopped")
 
-    # ----------------- Runtime State -----------------
+    # ----------------- Stop / Cleanup -----------------
+    def stop(self):
+        self._running = False
+        self.disable_sniffer()
+        self._stop_game_thread()
+
+    # ----------------- State -----------------
     def get_state(self):
         return AnalyzerState(
             self.game_active,

@@ -62,6 +62,12 @@ QPushButton:pressed {
 	background-color: #353535;
 }
 
+QPushButton:disabled {
+	background-color: #2a2a2a;
+	border: 1px solid #333;
+	color: #777;
+}
+
 /* ---------------------- Selection Controls ---------------------- */
 
 QCheckBox::indicator {

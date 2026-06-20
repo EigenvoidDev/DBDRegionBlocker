@@ -72,7 +72,7 @@ def run_gui():
     app.setWindowIcon(QIcon(icon_path))
 
     window = QWidget()
-    window.setWindowTitle("DBD Region Blocker v3.0.0")
+    window.setWindowTitle("DBD Region Blocker v3.1.0")
     window.setWindowIcon(QIcon(icon_path))
     window.setWindowFlags(
         Qt.WindowType.Window
@@ -100,7 +100,7 @@ def run_gui():
         return await asyncio.to_thread(status_service.fetch_status)
 
     # Feature Flags
-    sniffer_supported = PacketSniffer.supported
+    sniffer_supported = PacketSniffer.SUPPORTED
 
     # ---------------------- Layouts ----------------------
     main_layout = QVBoxLayout()
@@ -189,9 +189,12 @@ def run_gui():
 
     apply_changes_button = QPushButton("Apply Changes")
     restore_defaults_button = QPushButton("Restore Defaults")
+    toggle_sniffer_button = QPushButton()
+    toggle_sniffer_button.setEnabled(sniffer_supported)
 
     buttons_layout.addWidget(apply_changes_button)
     buttons_layout.addWidget(restore_defaults_button)
+    buttons_layout.addWidget(toggle_sniffer_button)
 
     main_layout.addLayout(buttons_layout)
 
@@ -204,29 +207,37 @@ def run_gui():
 
     window.setLayout(main_layout)
 
-    # ---------------------- Packet Sniffer Support Notice ----------------------
-    if not sniffer_supported:
-        append_status(
-            status_log,
-            PacketSniffer.UNSUPPORTED_MESSAGE,
-            QColor("#ffa500"),
-        )
-
     # ---------------------- Hosts File Initialization ----------------------
     result = hosts_manager.initialize_hosts_file()
 
-    if result:
+    if result == hosts_manager.HostsUpdateStatus.SUCCESS:
         append_status(
             status_log, "Hosts file initialized successfully.", QColor("#4caf50")
         )
-    else:
+
+    elif result == hosts_manager.HostsUpdateStatus.NO_CHANGES:
+        append_status(
+            status_log, "Hosts file is already up to date.", QColor("#ffa500")
+        )
+
+    elif result == hosts_manager.HostsUpdateStatus.PERMISSION_ERROR:
         append_status(
             status_log,
-            "Failed to initialize hosts file. Please run the application as an administrator.",
+            "Administrator privileges required to initialize the hosts file. Please run the application as an administrator.",
             QColor("#ff5555"),
         )
 
-    # ---------------------- Checkbox Sync ----------------------
+    elif result == hosts_manager.HostsUpdateStatus.WRITE_ERROR:
+        append_status(status_log, "Failed to initialize the hosts file.", QColor("#ff5555"))
+
+    else:
+        append_status(
+            status_log,
+            "An unexpected error occurred while initializing the hosts file.",
+            QColor("#ff5555"),
+        )
+
+    # ---------------------- Load Region Settings ----------------------
     def sync_checkboxes():
         try:
             config = hosts_manager.load_config()
@@ -235,25 +246,46 @@ def run_gui():
             for region_code, checkbox in checkboxes.items():
                 checkbox.setChecked(not regions.get(region_code, False))
 
-            append_status(status_log, hosts_manager.MESSAGES["OK"], QColor("#4caf50"))
-
-        except PermissionError:
             append_status(
-                status_log,
-                hosts_manager.MESSAGES["PERMISSION_ERROR"],
-                QColor("#ff5555"),
+                status_log, "Configuration loaded successfully.", QColor("#4caf50")
             )
 
         except Exception:
             append_status(
                 status_log,
-                "Configuration file is invalid or inaccessible. Default configuration loaded.",
+                "Configuration not found or invalid. Default configuration created.",
                 QColor("#ffa500"),
             )
 
     sync_checkboxes()
 
-    # ---------------------- Configuration Control ----------------------
+    # ---------------------- Packet Sniffer Initialization ----------------------
+    if not sniffer_supported:
+        append_status(
+            status_log,
+            "Packet sniffing is only supported on Windows.",
+            QColor("#ffa500"),
+        )
+
+    def handle_sniffer_state(state):
+        if state:
+            append_status(status_log, "Packet sniffer enabled.", QColor("#4caf50"))
+        else:
+            if analyzer.sniffer_enabled:
+                append_status(
+                    status_log,
+                    "Administrator privileges required to start packet sniffer. Please run the application as an administrator.",
+                    QColor("#ff5555"),
+                )
+            else:
+                append_status(status_log, "Packet sniffer disabled.", QColor("#ffa500"))
+
+    analyzer.on_sniffer_state = handle_sniffer_state
+
+    if hosts_manager.get_packet_sniffer_enabled():
+        analyzer.enable_sniffer()
+
+    # ---------------------- User Controls & State Management ----------------------
     def apply_changes():
         try:
             for region_code, checkbox in checkboxes.items():
@@ -263,30 +295,32 @@ def run_gui():
 
             if result == hosts_manager.HostsUpdateStatus.SUCCESS:
                 append_status(
-                    status_log, hosts_manager.MESSAGES["SUCCESS"], QColor("#4caf50")
+                    status_log,
+                    "Hosts file updated successfully. Restart Dead by Daylight for changes to apply.",
+                    QColor("#4caf50"),
                 )
 
             elif result == hosts_manager.HostsUpdateStatus.NO_CHANGES:
                 append_status(
-                    status_log, hosts_manager.MESSAGES["NO_CHANGES"], QColor("#ffa500")
+                    status_log, "Hosts file is already up to date.", QColor("#ffa500")
                 )
 
             elif result == hosts_manager.HostsUpdateStatus.PERMISSION_ERROR:
                 append_status(
                     status_log,
-                    hosts_manager.MESSAGES["PERMISSION_ERROR"],
+                    "Administrator privileges required to update the hosts file. Please run the application as an administrator.",
                     QColor("#ff5555"),
                 )
 
-            else:
+            elif result == hosts_manager.HostsUpdateStatus.WRITE_ERROR:
                 append_status(
-                    status_log, hosts_manager.MESSAGES["WRITE_ERROR"], QColor("#ff5555")
+                    status_log, "Failed to update the hosts file.", QColor("#ff5555")
                 )
 
         except Exception:
             append_status(
                 status_log,
-                "Unexpected error while applying configuration.",
+                "An unexpected error occurred while applying changes.",
                 QColor("#ff5555"),
             )
 
@@ -307,30 +341,62 @@ def run_gui():
 
             elif result == hosts_manager.HostsUpdateStatus.NO_CHANGES:
                 append_status(
-                    status_log, hosts_manager.MESSAGES["NO_CHANGES"], QColor("#ffa500")
+                    status_log,
+                    "Hosts file is already in default state.",
+                    QColor("#ffa500"),
                 )
 
             elif result == hosts_manager.HostsUpdateStatus.PERMISSION_ERROR:
                 append_status(
                     status_log,
-                    hosts_manager.MESSAGES["PERMISSION_ERROR"],
+                    "Administrator privileges required to update the hosts file. Please run the application as an administrator.",
                     QColor("#ff5555"),
                 )
 
-            else:
+            elif result == hosts_manager.HostsUpdateStatus.WRITE_ERROR:
                 append_status(
-                    status_log, hosts_manager.MESSAGES["WRITE_ERROR"], QColor("#ff5555")
+                    status_log, "Failed to update the hosts file.", QColor("#ff5555")
                 )
 
         except Exception:
             append_status(
                 status_log,
-                "Unexpected error while restoring defaults.",
+                "An unexpected error occurred while restoring defaults.",
                 QColor("#ff5555"),
             )
 
+    def toggle_sniffer():
+        try:
+            if analyzer.sniffer_enabled:
+                analyzer.disable_sniffer()
+                hosts_manager.set_packet_sniffer_enabled(False)
+
+            else:
+                analyzer.enable_sniffer()
+                hosts_manager.set_packet_sniffer_enabled(True)
+
+            update_sniffer_button_text()
+
+        except Exception:
+            append_status(
+                status_log, "Failed to toggle packet sniffer.", QColor("#ff5555")
+            )
+
+    def update_sniffer_button_text():
+        if not sniffer_supported:
+            toggle_sniffer_button.setText("Packet Sniffer Unsupported")
+
+        elif analyzer.sniffer_enabled:
+            toggle_sniffer_button.setText("Disable Packet Sniffer")
+
+        else:
+            toggle_sniffer_button.setText("Enable Packet Sniffer")
+
     apply_changes_button.clicked.connect(apply_changes)
     restore_defaults_button.clicked.connect(restore_defaults)
+    toggle_sniffer_button.clicked.connect(toggle_sniffer)
+
+    update_sniffer_button_text()
 
     # ---------------------- Region Status Service ----------------------
     async def update_region_online_status():
@@ -425,13 +491,13 @@ def run_gui():
 
     analyzer.on_server_detected = on_server_detected
 
-    # ---------------------- Background Tasks ----------------------
+    # ---------------------- Background Services Initialization ----------------------
     async def run_analyzer():
         await asyncio.to_thread(analyzer.run)
 
     analyzer_task = loop.create_task(run_analyzer())
 
-    # ---------------------- Game Running State Change Detection ----------------------
+    # ---------------------- Game State Change Detection ----------------------
     last_game_state = None
 
     def update_analyzer_log():
