@@ -72,7 +72,7 @@ def run_gui():
     app.setWindowIcon(QIcon(icon_path))
 
     window = QWidget()
-    window.setWindowTitle("DBD Region Blocker v3.1.0")
+    window.setWindowTitle("DBD Region Blocker v3.1.1")
     window.setWindowIcon(QIcon(icon_path))
     window.setWindowFlags(
         Qt.WindowType.Window

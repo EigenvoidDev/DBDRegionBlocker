@@ -24,10 +24,10 @@ class RegionAnalyzer:
         self.resolver = AWSRegionResolver()
         self.tracker = SessionTracker()
 
-        # Shared Resources
-        self.packet_queue = queue.Queue(maxsize=10000)
+        # Packet Queue
+        self.packet_queue = queue.Queue(maxsize=500)
 
-        # Current State
+        # State Tracking
         self.game_active = False
         self.current_server_ip = None
         self.current_region = None
@@ -36,18 +36,19 @@ class RegionAnalyzer:
         self.on_server_detected = None
         self.on_sniffer_state = None
 
-        # Analyzer State
+        # Runtime State
         self._running = False
 
         # Game Detection
         self._game_thread = None
         self._game_stop_event = threading.Event()
 
-        # Packet Sniffer
+        # Sniffer Configuration
         self._sniffer_supported = PacketSniffer.SUPPORTED
         self.sniffer_enabled = False
         self._sniffer_start_requested = False
 
+        # Sniffer Thread
         self._sniffer_thread = None
         self._sniffer = None
 
@@ -123,12 +124,6 @@ class RegionAnalyzer:
         if callable(self.on_server_detected):
             self.on_server_detected("", "")
 
-        if self._sniffer and self._sniffer.handle:
-            try:
-                self._sniffer.handle.close()
-            except Exception:
-                pass
-
         if self._sniffer_thread and self._sniffer_thread.is_alive():
             self._sniffer_thread.join(timeout=2)
 
@@ -139,7 +134,7 @@ class RegionAnalyzer:
 
     def _reset_state(self):
         self.tracker = SessionTracker()
-        self.packet_queue = queue.Queue(maxsize=10000)
+        self.packet_queue = queue.Queue(maxsize=500)
 
         self.current_server_ip = None
         self.current_region = None
@@ -176,8 +171,6 @@ class RegionAnalyzer:
                         break
 
                     try:
-                        sniffer.send(packet)
-
                         if packet.is_outbound and packet.udp:
                             ip = packet.dst_addr
 

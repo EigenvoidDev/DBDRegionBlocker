@@ -3,7 +3,7 @@ import time
 
 
 class SessionTracker:
-    def __init__(self, window=2.0, min_hits_threshold=10):
+    def __init__(self, window=3.0, min_hits_threshold=15):
         self.window = window
         self.min_hits_threshold = min_hits_threshold
 

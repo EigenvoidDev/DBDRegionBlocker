@@ -18,7 +18,10 @@ class PacketSniffer:
         if not self.SUPPORTED:
             return self
 
-        self.handle = self.pydivert.WinDivert(self.filter_expr)
+        self.handle = self.pydivert.WinDivert(
+            self.filter_expr, flags=self.pydivert.Flag.SNIFF
+        )
+
         self.handle.open()
         return self
 
@@ -31,22 +34,8 @@ class PacketSniffer:
             self.handle = None
 
     def __iter__(self):
-        if not self.SUPPORTED:
-            raise RuntimeError(self.UNSUPPORTED_MESSAGE)
-
         if self.handle is None:
-            raise RuntimeError("PacketSniffer not started.")
-
+            raise RuntimeError(
+                'PacketSniffer not started. Use "with PacketSniffer() as sniffer".'
+            )
         return iter(self.handle)
-
-    def send(self, packet):
-        if not self.SUPPORTED:
-            return
-
-        handle = self.handle
-
-        if handle is not None:
-            try:
-                handle.send(packet)
-            except (OSError, RuntimeError):
-                pass
